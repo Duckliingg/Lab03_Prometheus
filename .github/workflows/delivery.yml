@@ -1,0 +1,72 @@
+name: Deploy and Test Metrics
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Compose
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y docker-compose
+
+    - name: Start services with Docker Compose
+      run: |
+        docker-compose up -d
+        sleep 30  # Esperar que los servicios inicien
+
+    - name: Wait for services to be ready
+      run: |
+        # Esperar que la API esté lista
+        until curl -f http://localhost:5000/health; do
+          echo "Waiting for API..."
+          sleep 5
+        done
+        
+        # Esperar que Prometheus esté lista
+        until curl -f http://localhost:9090/-/ready; do
+          echo "Waiting for Prometheus..."
+          sleep 5
+        done
+
+    - name: Generate traffic for metrics
+      run: |
+        # Generar tráfico para crear métricas
+        for i in {1..20}; do
+          curl -s http://localhost:5000/api/TiposDocumentos > /dev/null
+          sleep 1
+        done
+
+    - name: Test Prometheus metrics
+      run: |
+        echo "=== Testing Prometheus Metrics ==="
+        
+        # Hacer petición GET a Prometheus para obtener métricas
+        curl -s "http://localhost:9090/api/v1/query?query=up" | jq .
+        
+        echo "=== HTTP Requests Metric ==="
+        curl -s "http://localhost:9090/api/v1/query?query=http_requests_received_total" | jq .
+        
+        echo "=== Health Check Metric ==="
+        curl -s "http://localhost:9090/api/v1/query?query=healthcheck_status" | jq .
+
+    - name: Show service status
+      run: |
+        echo "=== Docker Containers Status ==="
+        docker ps -a
+        
+        echo "=== Service URLs ==="
+        echo "API: http://localhost:5000"
+        echo "Prometheus: http://localhost:9090"
+        echo "Grafana: http://localhost:3000"
+
+    - name: Stop services
+      if: always()
+      run: |
+        docker-compose down
